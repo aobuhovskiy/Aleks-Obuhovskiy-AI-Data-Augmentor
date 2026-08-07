@@ -47,6 +47,7 @@ This manual review is part of the quality-control process rather than an attempt
 
 ```text
 Aleks-Obuhovskiy-AI-Data-Augmentor/
+├── app.py
 ├── data/
 │   └── starter-companies.csv
 ├── output/
@@ -54,7 +55,8 @@ Aleks-Obuhovskiy-AI-Data-Augmentor/
 ├── reflection/
 │   └── Aleks_Obuhovskiy_AI_Data_Augmentor_Reflection.pdf
 ├── src/
-│   └── augment_companies.py
+│   ├── augment_companies.py
+│   └── augment_companies_Tavily.py   # optional earlier prototype
 ├── requirements.txt
 └── README.md
 ```
@@ -89,6 +91,24 @@ A local search cache may also be created at:
 data/ddgs_cache.json
 ```
 
+## Streamlit UI
+
+The repository includes a simple Streamlit interface as an optional challenge feature.
+
+Start the UI from the repository root:
+
+```bash
+streamlit run app.py
+```
+
+The UI provides three views:
+
+- **Final Dataset** - browse, filter, and download the validated 50-company spreadsheet.
+- **Try the Agent** - upload a CSV and run a small live demo on up to 5 selected companies.
+- **How It Works** - review the augmentation and QA workflow.
+
+The 5-company live limit is intentional. It keeps the classroom demo responsive while the full 50-company result remains available as the validated submission dataset.
+
 ## Data Quality Rules
 
 - Prefer the company's primary official website.
@@ -109,6 +129,7 @@ data/ddgs_cache.json
 - phonenumbers
 - VS Code
 - Git / GitHub
+- Streamlit
 
 ## Final Deliverables
 
