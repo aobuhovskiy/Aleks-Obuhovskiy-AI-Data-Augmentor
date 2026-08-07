@@ -1,5 +1,5 @@
 # AI Data Augmentor - Repair/QA optimized DDGS version
-VERSION = "2026-08-07-LOOP-V1"
+VERSION = "2026-08-07-REPAIR-V3"
 # Preserves good prior results and repairs only suspicious/missing fields.
 
 import os
@@ -32,7 +32,6 @@ PROCESS_ONLY_MISSING = True
 SEARCH_DELAY_SECONDS = 0.60
 FETCH_DELAY_SECONDS = 0.10
 MAX_SEARCH_RETRIES = 2
-MAX_AUGMENTATION_PASSES = 3
 MAX_RESULTS = 6
 MAX_OFFICIAL_PAGES = 2
 HTTP_TIMEOUT = 7
@@ -600,51 +599,26 @@ def candidate_phones_from_jsonld(jsonld, source):
     return candidates
 
 
-def search_snippet_pages(company_name, website, purpose, pass_number=1):
+def search_snippet_pages(company_name, website, purpose):
     """Return DDGS result snippets as lightweight pseudo-pages.
 
-    Looping mode intentionally changes the query profile on each pass so the
-    agent does not repeat the exact same one-shot request. Each pass remains
-    restricted to the verified official domain.
+    This is much faster than opening many company pages and works well when
+    official sites block automated requests but search results expose the
+    relevant contact/HQ text.
     """
     domain = get_base_domain(website)
     if not domain:
         return []
-
-    pass_number = max(1, min(int(pass_number), MAX_AUGMENTATION_PASSES))
-
     if purpose == "phone":
-        profiles = {
-            1: [
-                f'site:{domain} "{company_name}" "customer service" phone',
-                f'site:{domain} "{company_name}" "contact us" phone',
-            ],
-            2: [
-                f'site:{domain} "{company_name}" "customer care" telephone',
-                f'site:{domain} "{company_name}" support "call us"',
-            ],
-            3: [
-                f'site:{domain} "{company_name}" contact phone support',
-                f'site:{domain} "{company_name}" help telephone',
-            ],
-        }
+        queries = [
+            f'site:{domain} "{company_name}" "customer service" phone',
+            f'site:{domain} "{company_name}" "contact us" phone',
+        ]
     else:
-        profiles = {
-            1: [
-                f'site:{domain} "{company_name}" headquarters',
-                f'site:{domain} "{company_name}" "corporate address"',
-            ],
-            2: [
-                f'site:{domain} "{company_name}" "our offices"',
-                f'site:{domain} "{company_name}" "company address"',
-            ],
-            3: [
-                f'site:{domain} "{company_name}" about location headquarters',
-                f'site:{domain} "{company_name}" contact address',
-            ],
-        }
-
-    queries = profiles[pass_number]
+        queries = [
+            f'site:{domain} "{company_name}" headquarters',
+            f'site:{domain} "{company_name}" "corporate address"',
+        ]
 
     pages = []
     seen = set()
@@ -664,7 +638,7 @@ def search_snippet_pages(company_name, website, purpose, pass_number=1):
     return pages
 
 
-def find_phone(company_name, pages, website=None, pass_number=1):
+def find_phone(company_name, pages, website=None):
     candidates = []
     for page in pages:
         source = page["url"]
@@ -673,7 +647,7 @@ def find_phone(company_name, pages, website=None, pass_number=1):
 
     # Fast official-domain search-snippet fallback.
     if website and not candidates:
-        for page in search_snippet_pages(company_name, website, "phone", pass_number):
+        for page in search_snippet_pages(company_name, website, "phone"):
             candidates.extend(candidate_phones_from_text(page.get("text", ""), page["url"]))
 
     if not candidates:
@@ -846,14 +820,14 @@ def text_locations(page):
     return results
 
 
-def find_location(company_name, pages, website=None, pass_number=1):
+def find_location(company_name, pages, website=None):
     candidates = []
     for page in pages:
         candidates.extend(text_locations(page))
         candidates.extend(jsonld_locations(page))
 
     if website and not candidates:
-        for page in search_snippet_pages(company_name, website, "location", pass_number):
+        for page in search_snippet_pages(company_name, website, "location"):
             candidates.extend(text_locations(page))
             candidates.extend(jsonld_locations(page))
 
@@ -949,10 +923,11 @@ def row_needs_repair(row):
     return bool(row_repair_reasons(row))
 
 
-def process_company_once(company_name, existing_website="UNKNOWN", existing_phone="UNKNOWN", existing_location="UNKNOWN", pass_number=1):
+def process_company(company_name, existing_website="UNKNOWN", existing_phone="UNKNOWN", existing_location="UNKNOWN"):
     website = existing_website
     website_source = "EXISTING_VERIFIED_RESULT"
 
+    # Resolve only when unknown/suspicious or when a verified exception exists.
     override = WEBSITE_OVERRIDES.get(company_name, None)
     if override is not None:
         website = override
@@ -964,6 +939,7 @@ def process_company_once(company_name, existing_website="UNKNOWN", existing_phon
         return "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"
 
     overrides = FIELD_OVERRIDES.get(company_name, {})
+
     phone, phone_source = existing_phone, "EXISTING_VERIFIED_RESULT"
     location, location_source = existing_location, "EXISTING_VERIFIED_RESULT"
 
@@ -974,26 +950,33 @@ def process_company_once(company_name, existing_website="UNKNOWN", existing_phon
         location = overrides["Location"]
         location_source = "MANUAL_VERIFIED_FIELD"
 
-    need_phone = "Phone" not in overrides and phone_is_missing_or_suspicious(company_name, phone)
-    need_location = "Location" not in overrides and location_is_missing_or_suspicious(location, company_name)
+    need_phone = (
+        "Phone" not in overrides
+        and phone_is_missing_or_suspicious(company_name, phone)
+    )
+    need_location = (
+        "Location" not in overrides
+        and location_is_missing_or_suspicious(location, company_name)
+    )
 
+    # Search snippets first: fast and usually enough.
     if need_phone:
-        snippet_pages = search_snippet_pages(company_name, website, "phone", pass_number)
-        phone, phone_source = find_phone(company_name, snippet_pages, website, pass_number)
+        snippet_pages = search_snippet_pages(company_name, website, "phone")
+        phone, phone_source = find_phone(company_name, snippet_pages, website)
 
     if need_location:
-        snippet_pages = search_snippet_pages(company_name, website, "location", pass_number)
-        location, location_source = find_location(company_name, snippet_pages, website, pass_number)
+        snippet_pages = search_snippet_pages(company_name, website, "location")
+        location, location_source = find_location(company_name, snippet_pages, website)
 
-    # On the final pass, use direct official pages as the last fallback.
-    if pass_number == MAX_AUGMENTATION_PASSES and ((need_phone and phone == "UNKNOWN") or (need_location and location == "UNKNOWN")):
+    # Direct-page fallback only for fields still unresolved. Keep it small.
+    if (need_phone and phone == "UNKNOWN") or (need_location and location == "UNKNOWN"):
         urls = official_page_urls(company_name, website)
         pages = [fetch_page(url) for url in urls]
         pages = [p for p in pages if p.get("status") == 200 and (p.get("text") or p.get("jsonld"))]
         if need_phone and phone == "UNKNOWN":
-            phone, phone_source = find_phone(company_name, pages, website, pass_number)
+            phone, phone_source = find_phone(company_name, pages, website)
         if need_location and location == "UNKNOWN":
-            location, location_source = find_location(company_name, pages, website, pass_number)
+            location, location_source = find_location(company_name, pages, website)
 
     sources = []
     for source in [website_source, phone_source, location_source]:
@@ -1003,52 +986,9 @@ def process_company_once(company_name, existing_website="UNKNOWN", existing_phon
     return website, phone, location, " | ".join(sources) if sources else "UNKNOWN"
 
 
-def process_company(company_name, existing_website="UNKNOWN", existing_phone="UNKNOWN", existing_location="UNKNOWN"):
-    """Loop through unresolved fields with progressively different searches.
-
-    Verified/manual values are preserved. The loop stops early when no targeted
-    field remains unresolved, and stops after MAX_AUGMENTATION_PASSES otherwise.
-    """
-    website, phone, location = existing_website, existing_phone, existing_location
-    all_sources = []
-
-    for pass_number in range(1, MAX_AUGMENTATION_PASSES + 1):
-        print(f"  Loop pass {pass_number}/{MAX_AUGMENTATION_PASSES}")
-        website, phone, location, source = process_company_once(
-            company_name, website, phone, location, pass_number
-        )
-
-        if source and source != "UNKNOWN":
-            for item in source.split(" | "):
-                if item and item not in all_sources:
-                    all_sources.append(item)
-
-        phone_unresolved = phone_is_missing_or_suspicious(company_name, phone)
-        location_unresolved = location_is_missing_or_suspicious(location, company_name)
-        website_unresolved = website_is_suspicious(company_name, website)
-
-        if not (website_unresolved or phone_unresolved or location_unresolved):
-            print(f"  Loop complete after pass {pass_number}: targeted fields resolved.")
-            break
-
-        if pass_number < MAX_AUGMENTATION_PASSES:
-            unresolved = []
-            if website_unresolved:
-                unresolved.append("website")
-            if phone_unresolved:
-                unresolved.append("phone")
-            if location_unresolved:
-                unresolved.append("location")
-            print("  Still unresolved:", ", ".join(unresolved), "-> trying alternate search strategy")
-    else:
-        print("  Loop retry limit reached; unresolved values remain UNKNOWN.")
-
-    return website, phone, location, " | ".join(all_sources) if all_sources else "UNKNOWN"
-
-
 def main():
     print(f"AI Data Augmentor version: {VERSION}")
-    print("Looping mode: verified corrections are locked; unresolved targeted fields get up to 3 search passes.")
+    print("QA repair mode V3: verified corrections are locked; broad UNKNOWN re-search is disabled.")
     df = load_workbook()
     total = len(df)
 
