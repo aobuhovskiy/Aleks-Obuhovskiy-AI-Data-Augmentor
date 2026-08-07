@@ -11,9 +11,19 @@ The goal was to take a starter spreadsheet of 50 outdoor and apparel companies a
 - Official website
 - Source / verification information
 
-The project demonstrates how AI-assisted automation can improve incomplete business data while also showing the importance of validation, source quality, and human review.
+The project demonstrates how AI-assisted automation can improve incomplete business data while also showing the importance of validation, source quality, confidence handling, and human review.
 
-The final solution combines automated enrichment, data validation, manual quality assurance, a Streamlit user interface, and an AWS serverless cloud deployment.
+The final solution includes:
+
+- Automated data augmentation
+- Looping and retry logic
+- Validation and human QA
+- Streamlit user interface
+- AWS serverless deployment
+- DynamoDB NoSQL storage
+- Terraform Infrastructure as Code
+- GitHub Actions automated testing
+- S3 + CloudFront CDN delivery
 
 ---
 
@@ -24,12 +34,13 @@ The main objectives were to:
 1. Read the original company dataset.
 2. Automatically research missing company information.
 3. Validate results before saving them.
-4. Avoid guessing when reliable information could not be found.
-5. Store uncertain values as `UNKNOWN`.
-6. Produce a clean augmented Excel spreadsheet.
-7. Document the approach, challenges, and lessons learned.
-8. Provide a simple UI for reviewing the data.
-9. Extend the project with Infrastructure as Code, NoSQL, and serverless cloud technologies.
+4. Retry unresolved fields using a controlled loop.
+5. Avoid guessing when reliable information could not be found.
+6. Store uncertain values as `UNKNOWN`.
+7. Produce a clean augmented Excel spreadsheet.
+8. Document the approach, challenges, and lessons learned.
+9. Provide a simple UI for reviewing the data.
+10. Extend the project with cloud, CI, NoSQL, serverless, and CDN technologies.
 
 ---
 
@@ -78,7 +89,7 @@ This was done to avoid introducing fabricated or unreliable information.
 
 - Streamlit
 
-### Extra Challenge – Cloud
+### Cloud / Extra Challenge
 
 - Terraform
 - Amazon DynamoDB
@@ -87,12 +98,23 @@ This was done to avoid introducing fabricated or unreliable information.
 - AWS CLI
 - boto3
 
+### Super Extra Challenge
+
+- Looping / retry logic
+- GitHub Actions
+- Amazon S3
+- Amazon CloudFront CDN
+
 ---
 
 ## Project Structure
 
 ```text
 Aleks-Obuhovskiy-AI-Data-Augmentor/
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yml
 │
 ├── app.py
 ├── README.md
@@ -110,6 +132,8 @@ Aleks-Obuhovskiy-AI-Data-Augmentor/
 │
 ├── src/
 │   ├── augment_companies.py
+│   ├── augment_companies_LOOP_V1.py
+│   ├── augment_companies_PRE_LOOP.py
 │   └── augment_companies_Tavily.py
 │
 └── cloud/
@@ -125,6 +149,7 @@ Aleks-Obuhovskiy-AI-Data-Augmentor/
     │   ├── main.tf
     │   ├── variables.tf
     │   ├── outputs.tf
+    │   ├── cdn.tf
     │   ├── terraform.tfvars.example
     │   └── .terraform.lock.hcl
     │
@@ -154,7 +179,7 @@ The repository also contains an earlier Tavily-based version:
 
 `src/augment_companies_Tavily.py`
 
-I kept this version because it shows the development process and how the solution changed after testing.
+This earlier version is kept to show the development process and how the solution changed after testing.
 
 ## 3. Prefer Official Sources
 
@@ -168,20 +193,20 @@ The solution looks for:
 - Company headquarters information
 - Official support numbers
 
-Results from retailers, unrelated businesses, regional sites, and suspicious look-alike domains were treated carefully.
+Results from retailers, unrelated businesses, regional sites, and suspicious look-alike domains are treated carefully.
 
 ## 4. Validate the Results
 
-Automated search results were not accepted blindly.
+Automated search results are not accepted blindly.
 
-Validation included checks for:
+Validation includes checks for:
 
 - Incorrect or unrelated domains
 - Regional domains instead of official corporate sites
 - Retailer websites
 - Look-alike domains
 - Incorrect phone numbers
-- International phone numbers when a U.S. customer-service number was expected
+- International phone numbers when a U.S. customer-service number is expected
 - Distribution centers confused with headquarters
 - Incomplete or malformed addresses
 
@@ -189,11 +214,61 @@ Validation included checks for:
 
 Automated enrichment produced useful results, but several edge cases showed that search automation alone was not reliable enough.
 
-I therefore performed a final human QA review using official company information.
+A final human QA review was therefore performed using stronger official-source evidence.
 
-When reliable information could not be confirmed, I used `UNKNOWN` rather than guessing.
+When reliable information could not be confirmed, the result remained `UNKNOWN` rather than being guessed.
 
-**Key lesson:** Automated enrichment can accelerate research, but high-quality business data still requires validation and clear confidence rules.
+**Key lesson:** Automated enrichment can accelerate research, but high-quality business data still requires validation, confidence rules, and human review.
+
+---
+
+# Super Extra Challenge 1: Looping
+
+The original one-pass enrichment workflow was extended with controlled looping.
+
+Instead of trying only one search and stopping, unresolved fields can be retried using alternate search strategies.
+
+The loop:
+
+1. Searches for unresolved information.
+2. Validates the result.
+3. Stops immediately when a field is verified.
+4. Tries another strategy when the field is still unresolved.
+5. Stops after a limited number of attempts.
+6. Leaves the result as `UNKNOWN` if verification still fails.
+
+This avoids unlimited searching while demonstrating a more agent-like iterative workflow.
+
+Example flow:
+
+```text
+Company
+   |
+   v
+Search
+   |
+   v
+Validate
+   |
+   +---- Verified ----> Save
+   |
+   v
+Retry with alternate strategy
+   |
+   v
+Retry limit reached?
+   |
+   +---- Yes ----> UNKNOWN
+```
+
+The official script is:
+
+`src/augment_companies.py`
+
+Backup and development versions are also preserved:
+
+- `src/augment_companies_PRE_LOOP.py`
+- `src/augment_companies_LOOP_V1.py`
 
 ---
 
@@ -361,7 +436,7 @@ A second test requested:
 }
 ```
 
-The Lambda successfully retrieved Patagonia from DynamoDB, including:
+The Lambda successfully retrieved the Patagonia record from DynamoDB, including:
 
 - Official website
 - Ventura, California location
@@ -398,7 +473,123 @@ Successful result:
 PASS: Lambda local tests
 ```
 
-This allowed the serverless logic to be validated before creating AWS infrastructure.
+---
+
+# Super Extra Challenge 2: GitHub Actions
+
+A GitHub Actions workflow was added at:
+
+`.github/workflows/ci.yml`
+
+The workflow runs automatically on pushes and pull requests to the `main` branch.
+
+It performs:
+
+### Python Checks
+
+- Checks out the repository
+- Installs Python 3.12
+- Installs project dependencies
+- Checks Python syntax
+- Runs the local Lambda test
+
+### Terraform Checks
+
+- Installs Terraform
+- Runs `terraform init`
+- Runs `terraform validate`
+
+Both workflow jobs were successfully executed in GitHub Actions with green status.
+
+Current workflow behavior is intentionally focused on **CI validation**. AWS deployment remains manual so infrastructure is not modified automatically by every GitHub push.
+
+---
+
+# Super Extra Challenge 3: S3 + CloudFront CDN
+
+The final Excel output was also published through an AWS Content Delivery Network.
+
+The CDN infrastructure is defined in:
+
+`cloud/terraform/cdn.tf`
+
+Terraform provisions:
+
+- Private Amazon S3 bucket
+- S3 public-access protection
+- CloudFront Origin Access Control
+- CloudFront distribution
+- S3 bucket policy allowing CloudFront read access
+
+The S3 bucket remains private. CloudFront is used to deliver the file securely.
+
+## CDN Architecture
+
+```text
+augmented-companies.xlsx
+        |
+        v
+Amazon S3
+   private bucket
+        |
+        v
+Amazon CloudFront
+        |
+        v
+CDN Download URL
+```
+
+The final workbook was uploaded to S3 and successfully downloaded through CloudFront.
+
+CDN URL:
+
+https://d2uhh4vke00btl.cloudfront.net/augmented-companies.xlsx
+
+This completed the CDN portion of the Super Extra Challenge.
+
+---
+
+# Final End-to-End Architecture
+
+```text
+Starter CSV
+    |
+    v
+Python Data Augmentor
+    |
+    +--> Search
+    +--> Validate
+    +--> Loop / Retry
+    +--> Human QA
+    |
+    v
+Validated Excel
+    |
+    +--------------------+
+    |                    |
+    v                    v
+Streamlit UI          DynamoDB
+                         |
+                         v
+                      Lambda
+
+Validated Excel
+    |
+    v
+Private S3 Bucket
+    |
+    v
+CloudFront CDN
+
+GitHub Push
+    |
+    v
+GitHub Actions
+    |
+    +--> Python Checks
+    +--> Lambda Test
+    +--> Terraform Validation
+```
 
 ---
 
@@ -413,8 +604,9 @@ The following rules were used:
 3. Validate extracted phone numbers.
 4. Review questionable locations manually.
 5. Preserve source information when possible.
-6. Use `UNKNOWN` when confidence is insufficient.
-7. Perform human QA before considering the spreadsheet final.
+6. Retry unresolved fields using controlled looping.
+7. Use `UNKNOWN` when confidence is insufficient.
+8. Perform human QA before considering the spreadsheet final.
 
 The project intentionally prioritizes **data reliability over completeness**.
 
@@ -443,10 +635,11 @@ It also needs:
 - Source prioritization
 - Validation rules
 - Confidence handling
+- Looping and retry control
 - Exception management
 - Human review for ambiguous cases
 
-I learned that an AI-enabled data enrichment solution should not simply maximize the number of populated fields. It should maximize the number of **defensible and verified fields**.
+The project also demonstrated how a local AI-assisted workflow can be expanded into a cloud architecture with automated validation and CDN delivery.
 
 ---
 
@@ -473,6 +666,15 @@ I learned that an AI-enabled data enrichment solution should not simply maximize
 - Real AWS deployment
 - Live DynamoDB company retrieval through Lambda
 
+## Super Extra Challenge Deliverables
+
+- Looping / iterative retry process
+- GitHub Actions automated CI workflow
+- Successful Python and Terraform checks in GitHub Actions
+- Amazon S3 output storage
+- Amazon CloudFront CDN
+- Successful download of the final Excel file through the CDN
+
 ---
 
 # Reflection
@@ -494,14 +696,14 @@ It summarizes:
 
 # Key Takeaway
 
-The project started as a spreadsheet enrichment exercise and evolved into a complete AI-assisted data workflow.
+The project started as a spreadsheet enrichment exercise and evolved into a broader AI-assisted data and cloud workflow.
 
 ```text
 Search
   ↓
-Extraction
-  ↓
 Validation
+  ↓
+Loop / Retry
   ↓
 Human QA
   ↓
@@ -512,9 +714,21 @@ Streamlit UI
 DynamoDB
   ↓
 AWS Lambda
+
+Excel Dataset
+  ↓
+Amazon S3
+  ↓
+CloudFront CDN
+
+GitHub Push
+  ↓
+GitHub Actions
+  ↓
+Automated Validation
 ```
 
-The most important lesson was that successful AI automation is not only about generating results. It is also about creating controls that determine when the system should trust a result, reject it, or clearly return `UNKNOWN`.
+The most important lesson was that successful AI automation is not only about generating results. It is also about creating controls that determine when the system should trust a result, retry it, reject it, or clearly return `UNKNOWN`.
 
 ---
 
