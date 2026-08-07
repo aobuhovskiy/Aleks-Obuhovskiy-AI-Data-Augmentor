@@ -737,3 +737,9 @@ The most important lesson was that successful AI automation is not only about ge
 **Aleks Obuhovskiy**
 
 CAIO Assignment #3 – AI Data Augmentor
+
+## Live Streamlit App
+
+The AI Data Augmentor UI is deployed and publicly accessible through Streamlit Community Cloud:
+
+[Open the AI Data Augmentor UI](https://aleks-obuhovskiy-ai-data-augmentor-n6ex28xpz3tdlfghhhwbst.streamlit.app/)
