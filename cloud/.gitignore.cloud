@@ -1,0 +1,13 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+terraform/lambda_function.zip
+
+# Python
+__pycache__/
+*.pyc
+
+# Local test/output files
+response.json

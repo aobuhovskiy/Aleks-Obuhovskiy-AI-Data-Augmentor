@@ -217,4 +217,5 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 # Local API keys and secrets
-.env
+.env.terraform/
+cloud/terraform/.terraform/

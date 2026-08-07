@@ -1,0 +1,5 @@
+# Copy this file to terraform.tfvars if you want to override defaults.
+
+aws_region   = "us-east-1"
+project_name = "ai-data-augmentor"
+table_name   = "ai-data-augmentor-companies"
